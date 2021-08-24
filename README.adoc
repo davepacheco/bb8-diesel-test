@@ -5,3 +5,111 @@
 = bb8-diesel-test
 
 Test behavior of bb8-diesel when database queries block.  See `src/bin/starve_current_task.rs` and `src/bin/starve_executor.rs`.
+
+== Starving the current task
+
+https://docs.rs/bb8-diesel/0.2.0/bb8_diesel/struct.DieselConnection.html[bb8-diesel] says:
+
+> All blocking methods within this type delegate to block_in_place.
+
+https://docs.rs/tokio/1.10.1/tokio/task/fn.block_in_place.html[`block_in_place`] is very clear that:
+
+> Be aware that although this function avoids starving other independently spawned tasks, any other code running concurrently in the same task will be suspended during the call to block_in_place. This can happen e.g. when using the join! macro.
+
+This test shows that behavior using the `select!` macro, which is arguably more confusing because the user of `select!` expects it to return when the first Future has finished.  Instead, when using bb8-diesel, it will always wait for the bb8-diesel operation.  (This might be obvious if you notice that there's no `async` at all in the bb8-diesel usage.  However, a lot of uses might appear to be `async` (e.g., because they asynchronously grab a connection from the pool), but then still behave synchronously.)
+
+Here's the output:
+
+[source,text]
+----
+$ cargo run --bin=starve_current_task
+    Finished dev [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/starve_current_task`
+TEST ONE: Issue two `tokio::time::sleep` calls using `tokio::select!`.
+Expected behavior: Only the shorter sleep completes.  It takes
+the expected amount of time.  (The other sleep is cancelled.)
+[2] begin tokio sleep for 300ms
+[1] begin tokio sleep for 500ms
+[2] done tokio sleep for 300ms, slept for 302.961769ms
+
+TEST TWO: Issue a `tokio::time::sleep` call and a database sleep call
+using `tokio::select!`.
+Expected behavior: We always wait the duration of the database sleep,
+even though it's longer than the other sleep.
+(ideal behavior: the shorter sleep completes first)
+[4] begin tokio sleep for 300ms
+[3] begin db sleep for 500ms
+[3] database sleep for 500ms, slept for 502.600241ms
+----
+
+This program shows that if you use https://docs.rs/tokio/1.10.1/tokio/macro.select.html[tokio::select!] (just as an example) to run two Futures concurrently from one task, and one of those Futures is a bb8-diesel query, the other Future will be starved.  In this program, the database query sleeps (in the database) for 500ms, while the other (starved) future sleeps for 300ms with `tokio::time::sleep`.  Note that the `select!` doesn't return for 500ms, and it's the database future that finished, not the one that slept for only 300ms.
+
+
+== Starving the executor
+
+Another problem, possibly worse, is that each of these operations appears to use up a **core (worker) thread**, not a blocking thread (see https://docs.rs/tokio/1.10.1/tokio/#cpu-bound-tasks-and-blocking-code[tokio docs]).
+
+This program issues eight tasks:
+
+. D1: "database" task -- use bb8-diesel to issue a database query to sleep for 1s
+. Q1: "quick" task -- just prints out the time since the program started
+. D2: another database task
+. Q2: another quick task
+. D3: another database task
+. Q3: another quick task
+. D4: another database task
+. Q4: another quick task
+
+This program configures tokio with 4 core threads and 8 blocking threads.
+
+In a fully asynchronous system, we'd expect to kick off all 8 tasks, and pretty soon, all four database tasks would be blocked, and all four quick tasks would have finished running.
+
+But here's what happens:
+
+[source,text]
+----
+$ cargo run --bin=starve_executor
+    Finished dev [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/starve_executor`
+[0] begin db sleep for 1s
+529.039µs intermediate task 0
+[1] begin db sleep for 1s
+2.358902ms intermediate task 1
+[2] begin db sleep for 1s
+4.212137ms intermediate task 2
+[3] begin db sleep for 1s
+[1] database sleep for 1s, slept for 1.002570997s
+[0] database sleep for 1s, slept for 1.004424384s
+1.005166747s intermediate task 3
+[2] database sleep for 1s, slept for 1.001007015s
+1.005174555s later task 0
+1.005227235s later task 1
+1.005369114s later task 2
+1.005522906s later task 3
+[3] database sleep for 1s, slept for 1.000962619s
+----
+
+This shows that the sequence was:
+
+. D1 issued (and presumably blocks)
+. Q1 ("intermediate task 0") issued and finishes
+. D2 issued (and presumably blocks)
+. Q2 ("intermediate task 1") issued and finishes
+. D3 issued (and presumably blocks)
+. Q3 ("intermediate task 2") issued and finishes
+. D4 issued (and presumably blocks)
+. One second passes
+. D2 finishes, D1 finishes, and Q4 ("intermediate task 3") is issued and finishes
+
+The smoking gun is the one second gap before "intermediate task 3" finishes.  What happens under the hood is:
+
+. D1 issued to thread 1 -- core thread 1 is now stuck.
+. Q1 issued to thread 2 and completes immediately.
+. D2 issued to thread 2 -- core thread 2 is now stuck.
+. Q2 issued to thread 3 and completes immediately.
+. D3 issued to thread 3 -- core thread 3 is now stuck.
+. Q3 issued to thread 4 and completes immediately.
+. D4 issued to thread 4 -- core thread 4 is now stuck.
+. Q4 is queued up.  There is no thread to run it!
+. Time passes (one second).
+. Any of the D1-D4 tasks finishes, frees up a thread, and Q4 runs.
