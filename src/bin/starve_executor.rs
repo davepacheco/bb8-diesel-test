@@ -9,6 +9,8 @@ static NTHREADS_CORE: usize = 4;
 static NTHREADS_BLOCKING: usize = 8;
 /// Number of database connections to create and use for sleeps
 static NDBCONNS: usize = 4;
+/// bb8 pool size
+static BB8_POOL_SIZE: u32 = 32;
 
 fn main() {
     let manager: bb8_diesel::DieselConnectionManager<diesel::pg::PgConnection> =
@@ -25,8 +27,8 @@ fn main() {
         .block_on(async {
             /* Set up a pool and establish all the connections up front. */
             let pool = bb8::Pool::builder()
-                .max_size(u32::try_from(2 * NDBCONNS).unwrap())
-                .min_idle(Some(u32::try_from(NDBCONNS).unwrap()))
+                .max_size(BB8_POOL_SIZE)
+                .min_idle(Some(BB8_POOL_SIZE))
                 .build(manager)
                 .await
                 .unwrap();
