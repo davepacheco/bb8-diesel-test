@@ -30,7 +30,7 @@ pub async fn sleep_using_tokio(id: u8, duration: std::time::Duration) {
 /// Like [`sleep_using_tokio`], but makes a database query to sleep instead of
 /// using [`tokio::time::sleep`].
 ///
-pub async fn sleep_using_db(
+pub async fn sleep_using_db_pool(
     id: u8,
     pool: &bb8::Pool<
         bb8_diesel::DieselConnectionManager<diesel::pg::PgConnection>,
@@ -38,10 +38,21 @@ pub async fn sleep_using_db(
     duration: std::time::Duration,
 ) {
     let conn = pool.get().await.unwrap();
+    sleep_using_db(id, &*conn, duration);
+}
+
+///
+/// Like [`sleep_using_db_pool`], but accepts the connection directly.
+///
+pub fn sleep_using_db(
+    id: u8,
+    conn: &diesel::pg::PgConnection,
+    duration: std::time::Duration,
+) {
     eprintln!("[{}] begin db sleep for {:?}", id, duration);
     let start = std::time::Instant::now();
     diesel::select(pg_sleep(duration.as_secs_f32()))
-        .load::<bool>(&*conn)
+        .load::<bool>(conn)
         .unwrap();
     eprintln!(
         "[{}] database sleep for {:?}, slept for {:?}",

@@ -5,7 +5,7 @@
 //!
 
 use bb8_diesel_test::sleep_using_tokio;
-use bb8_diesel_test::sleep_using_db;
+use bb8_diesel_test::sleep_using_db_pool;
 
 #[tokio::main]
 async fn main() {
@@ -36,7 +36,7 @@ async fn main() {
         (ideal behavior: the shorter sleep completes first)"
     );
     tokio::select! {
-        _ = sleep_using_db(3, &pool, std::time::Duration::from_millis(500)) => {}
+        _ = sleep_using_db_pool(3, &pool, std::time::Duration::from_millis(500)) => {}
         _ = sleep_using_tokio(4, std::time::Duration::from_millis(300)) => {}
     };
 }

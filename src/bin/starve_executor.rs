@@ -2,14 +2,13 @@
 
 use bb8_diesel_test::sleep_using_db;
 use std::convert::TryFrom;
-use std::sync::Arc;
 
 /// Number of "core" (worker) threads for the tokio executor
 static NTHREADS_CORE: usize = 4;
 /// Number of "blocking" threads for the tokio executor
 static NTHREADS_BLOCKING: usize = 8;
 /// Number of database connections to create and use for sleeps
-static NDBCONNS: usize = 12;
+static NDBCONNS: usize = 4;
 
 fn main() {
     let manager: bb8_diesel::DieselConnectionManager<diesel::pg::PgConnection> =
@@ -32,7 +31,6 @@ fn main() {
                 .await
                 .unwrap();
             let start = std::time::Instant::now();
-            let pool = Arc::new(pool);
             let mut wait = Vec::new();
 
             /*
@@ -54,14 +52,13 @@ fn main() {
              * tasks.
              */
             for i in 0..NDBCONNS {
-                let p = Arc::clone(&pool);
+                let conn = pool.get_owned().await.unwrap();
                 wait.push(tokio::spawn(async move {
                     sleep_using_db(
                         u8::try_from(i).unwrap(),
-                        &p,
+                        &conn,
                         std::time::Duration::from_millis(1000),
                     )
-                    .await;
                 }));
                 wait.push(tokio::spawn(async move {
                     eprintln!("{:?} intermediate task {}", start.elapsed(), i);
@@ -69,20 +66,8 @@ fn main() {
             }
 
             /*
-             * Kick off a bunch more quick tasks.
-             *
-             * In an ideal test, the database tasks would _only_ make the
-             * database query.  In that case, if the database tasks do indeed
-             * starve the executor, it would be super obvious: we'd see a bunch
-             * of database tasks start, interleaved with quick tasks completing,
-             * but we'd stop seeing quick tasks completing once we'd exhausted
-             * the number of threads that the database tasks run on.  That's not
-             * what we see because the database tasks have an actually
-             * asynchronous step up front, which is to acquire the connection.
-             * While this is happening, we may complete a bunch of intermediate
-             * tasks.  That hides the fact that starvation really is happening.
-             * We show that more clearly by kicking off a bunch more quick
-             * tasks.
+             * Kick off a bunch more quick tasks for more visibility into
+             * liveness.
              */
             for i in 0..NDBCONNS {
                 wait.push(tokio::spawn(async move {
