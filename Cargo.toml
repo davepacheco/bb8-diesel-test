@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 bb8 = "0.7"
+futures = "0.3.16"
 
 # Use smklein's branch of bb8-diesel, which has dependencies updated to modern Diesel and bb8.
 [dependencies.bb8-diesel]

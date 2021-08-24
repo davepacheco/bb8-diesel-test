@@ -1,18 +1,11 @@
-///
-/// Test whether, when using bb8_diesel, database queries starve execution of
-/// the rest of the current task.  We'd expect so, based on the docs.  This
-/// example shows the behavior using `tokio::select!`.
-///
+//!
+//! Test whether, when using bb8_diesel, database queries starve execution of
+//! the rest of the current task.  We'd expect so, based on the docs.  This
+//! example shows the behavior using `tokio::select!`.
+//!
 
-#[macro_use]
-extern crate diesel;
-use diesel::RunQueryDsl;
-
-// Expose the "pg_sleep" SQL function to Diesel.  This function is implemented
-// in PostgreSQL and CockroachDB to sleep for the requested number of seconds.
-diesel::sql_function! {
-    fn pg_sleep(seconds: diesel::sql_types::Float) -> diesel::sql_types::Bool;
-}
+use bb8_diesel_test::sleep_using_tokio;
+use bb8_diesel_test::sleep_using_db;
 
 #[tokio::main]
 async fn main() {
@@ -46,45 +39,4 @@ async fn main() {
         _ = sleep_using_db(3, &pool, std::time::Duration::from_millis(500)) => {}
         _ = sleep_using_tokio(4, std::time::Duration::from_millis(300)) => {}
     };
-}
-
-///
-/// Returns a Future that will sleep for the requested `duration` using
-/// [`tokio::time::sleep`].  Prints information to show when it starts and stops
-/// sleeping and how long it took.
-///
-async fn sleep_using_tokio(id: u8, duration: std::time::Duration) {
-    let start = std::time::Instant::now();
-
-    eprintln!("[{}] begin tokio sleep for {:?}", id, duration);
-    tokio::time::sleep(duration).await;
-    eprintln!(
-        "[{}] done tokio sleep for {:?}, slept for {:?}",
-        id,
-        duration,
-        start.elapsed()
-    );
-}
-
-///
-/// Like [`sleep_using_tokio`], but makes a database query to sleep instead of
-/// using [`tokio::time::sleep`].
-///
-async fn sleep_using_db(
-    id: u8,
-    pool: &bb8::Pool<
-        bb8_diesel::DieselConnectionManager<diesel::pg::PgConnection>,
-    >,
-    duration: std::time::Duration,
-) {
-    let c = pool.get().await.unwrap();
-    eprintln!("[{}] begin db sleep for {:?}", id, duration);
-    let start = std::time::Instant::now();
-    diesel::select(pg_sleep(duration.as_secs_f32())).load::<bool>(&*c).unwrap();
-    eprintln!(
-        "[{}] database sleep for {:?}, slept for {:?}",
-        id,
-        duration,
-        start.elapsed()
-    );
 }

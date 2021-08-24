@@ -4,4 +4,4 @@
 
 = bb8-diesel-test
 
-Test behavior of bb8-diesel when database queries block.  See `src/bin/starve_current_task.rs`.
+Test behavior of bb8-diesel when database queries block.  See `src/bin/starve_current_task.rs` and `src/bin/starve_executor.rs`.
