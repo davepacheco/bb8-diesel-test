@@ -1,0 +1,7 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= bb8-diesel-test
+
+Test behavior of bb8-diesel when database queries block.  See `src/bin/starve_current_task.rs`.

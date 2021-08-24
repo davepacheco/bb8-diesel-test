@@ -1,0 +1,21 @@
+[package]
+name = "bb8-diesel-test"
+version = "0.1.0"
+authors = ["David Pacheco <dap@oxidecomputer.com>"]
+edition = "2018"
+
+[dependencies]
+bb8 = "0.7"
+
+# Use smklein's branch of bb8-diesel, which has dependencies updated to modern Diesel and bb8.
+[dependencies.bb8-diesel]
+git = "https://github.com/smklein/bb8-diesel.git"
+branch = "repolish"
+
+[dependencies.diesel]
+version = "1.4"
+features = [ "postgres", "r2d2" ]
+
+[dependencies.tokio]
+version = "1.10"
+features = [ "full" ]
