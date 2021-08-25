@@ -2,6 +2,7 @@
 
 use bb8_diesel_test::sleep_using_db;
 use std::convert::TryFrom;
+use std::time::Duration;
 
 /// Number of "core" (worker) threads for the tokio executor
 static NTHREADS_CORE: usize = 4;
@@ -11,12 +12,13 @@ static NTHREADS_BLOCKING: usize = 8;
 static NDBCONNS: usize = 4;
 /// bb8 pool size
 static BB8_POOL_SIZE: u32 = 32;
+/// URL for connecting to database
+static DATABASE_URL: &str = "postgresql://root@127.0.0.1:32221?sslmode=disable";
 
 fn main() {
+    eprintln!("setting up pool for database {:?}", DATABASE_URL);
     let manager: bb8_diesel::DieselConnectionManager<diesel::pg::PgConnection> =
-        bb8_diesel::DieselConnectionManager::new(
-            "postgresql://root@127.0.0.1:32221?sslmode=disable",
-        );
+        bb8_diesel::DieselConnectionManager::new(DATABASE_URL);
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -29,9 +31,12 @@ fn main() {
             let pool = bb8::Pool::builder()
                 .max_size(BB8_POOL_SIZE)
                 .min_idle(Some(BB8_POOL_SIZE))
+                .connection_timeout(Duration::from_secs(3))
                 .build(manager)
                 .await
-                .unwrap();
+                .unwrap_or_else(|_| {
+                    panic!("failed to establish connection to database")
+                });
             let start = std::time::Instant::now();
             let mut wait = Vec::new();
 
@@ -54,7 +59,9 @@ fn main() {
              * tasks.
              */
             for i in 0..NDBCONNS {
-                let conn = pool.get_owned().await.unwrap();
+                let conn = pool.get_owned().await.unwrap_or_else(|_| {
+                    panic!("failed to establish connection to database")
+                });
                 wait.push(tokio::spawn(async move {
                     sleep_using_db(
                         u8::try_from(i).unwrap(),

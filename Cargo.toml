@@ -5,6 +5,7 @@ authors = ["David Pacheco <dap@oxidecomputer.com>"]
 edition = "2018"
 
 [dependencies]
+anyhow = "1.0"
 bb8 = "0.7"
 futures = "0.3.16"
 
